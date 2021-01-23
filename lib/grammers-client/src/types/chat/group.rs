@@ -139,18 +139,6 @@ impl Group {
         }
     }
     
-    pub fn is_megagroup(&self) -> bool {
-        use tl::enums::Chat;
-
-        match &self.0 {
-            Chat::Empty(chat) => false,
-            Chat::Chat(chat) => false,
-            Chat::Forbidden(chat) => false,
-            Chat::Channel(chat) => chat.megagroup,
-            Chat::ChannelForbidden(chat) => chat.megagroup,
-        }
-    }
-
     /// Return the title of this group.
     ///
     /// The title may be the empty string if the group is not accessible.
