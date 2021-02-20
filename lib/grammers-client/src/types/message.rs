@@ -5,7 +5,9 @@
 // <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
+use crate::types::{InputMessage, Media, Photo};
 use crate::utils;
+use crate::ChatMap;
 use crate::{types, ClientHandle};
 use grammers_mtsender::InvocationError;
 use grammers_tl_types as tl;
@@ -87,6 +89,55 @@ impl Message {
         }
     }
 
+    pub(crate) fn from_short_updates(
+        client: &ClientHandle,
+        updates: tl::types::UpdateShortSentMessage,
+        input: InputMessage,
+        chat: &Chat,
+    ) -> Self {
+        Self {
+            msg: tl::types::Message {
+                out: updates.out,
+                mentioned: false,
+                media_unread: false,
+                silent: input.silent,
+                post: false, // TODO true if sent to broadcast channel
+                from_scheduled: false,
+                legacy: false,
+                edit_hide: false,
+                pinned: false,
+                id: updates.id,
+                from_id: None, // TODO self
+                peer_id: chat.to_peer(),
+                fwd_from: None,
+                via_bot_id: None,
+                reply_to: input.reply_to.map(|reply_to_msg_id| {
+                    tl::types::MessageReplyHeader {
+                        reply_to_msg_id,
+                        reply_to_peer_id: None,
+                        reply_to_top_id: None,
+                    }
+                    .into()
+                }),
+                date: updates.date,
+                message: input.text,
+                media: updates.media,
+                reply_markup: input.reply_markup,
+                entities: updates.entities,
+                views: None,
+                forwards: None,
+                replies: None,
+                edit_date: None,
+                post_author: None,
+                grouped_id: None,
+                restriction_reason: None,
+            },
+            action: None,
+            client: client.clone(),
+            chats: ChatMap::single(chat),
+        }
+    }
+
     /// Whether the message is outgoing (i.e. you sent this message to some other chat) or
     /// incoming (i.e. someone else sent it to you or the chat).
     pub fn outgoing(&self) -> bool {
@@ -162,6 +213,15 @@ impl Message {
         self.msg
             .from_id
             .as_ref()
+            .or_else(|| {
+                // Incoming messages in private conversations don't include `from_id` since
+                // layer 119, but the sender can only be the chat we're in.
+                if !self.msg.out && matches!(self.msg.peer_id, tl::enums::Peer::User(_)) {
+                    Some(&self.msg.peer_id)
+                } else {
+                    None
+                }
+            })
             .and_then(|from| self.chats.get(from))
             .map(|e| e.clone())
     }
@@ -170,13 +230,16 @@ impl Message {
     ///
     /// This might be the user you're talking to for private conversations, or the group or
     /// channel where the message was sent.
-    pub fn chat(&self) -> types::Chat {
+    pub fn chat(&self) -> Option<types::Chat> {
         self.chats
             .get(&self.msg.peer_id)
             .map(|e| e.clone())
-            .unwrap()
     }
 
+    pub fn chat_id(&self) -> i32 {
+        self.msg.peer_id        
+    }
+    
     /// If this message was forwarded from a previous message, return the header with information
     /// about that forward.
     pub fn forward_header(&self) -> Option<tl::enums::MessageFwdHeader> {
@@ -215,7 +278,10 @@ impl Message {
     /// This not only includes photos or videos, but also contacts, polls, documents, locations
     /// and many other types.
     pub fn media(&self) -> Option<types::Media> {
-        self.msg.media.clone().and_then(types::Media::from_raw)
+        self.msg
+            .media
+            .clone()
+            .and_then(|x| Media::from_raw(x, self.client.clone()))
     }
 
     /// If the message has a reply markup (which can happen for messages produced by bots),
@@ -306,7 +372,7 @@ impl Message {
     /// replying to it.
     ///
     /// Shorthand for `ClientHandle::send_message`.
-    pub async fn respond(&mut self, message: types::InputMessage) -> Result<(), InvocationError> {
+    pub async fn respond(&mut self, message: types::InputMessage) -> Result<Self, InvocationError> {
         self.client.send_message(&self.chat(), message).await
     }
 
@@ -314,7 +380,7 @@ impl Message {
     /// it. This methods overrides the `reply_to` on the `InputMessage` to point to `self`.
     ///
     /// Shorthand for `ClientHandle::send_message`.
-    pub async fn reply(&mut self, message: types::InputMessage) -> Result<(), InvocationError> {
+    pub async fn reply(&mut self, message: types::InputMessage) -> Result<Self, InvocationError> {
         self.client
             .send_message(&self.chat(), message.reply_to(Some(self.msg.id)))
             .await
@@ -421,5 +487,14 @@ impl Message {
         } else {
             Ok(false)
         }
+    }
+
+    /// Get photo attached to the message if any.
+    pub fn photo(&self) -> Option<Photo> {
+        if let Media::Photo(photo) = self.media()? {
+            return Some(photo);
+        }
+
+        None
     }
 }

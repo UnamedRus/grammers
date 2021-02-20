@@ -348,14 +348,13 @@ impl ClientHandle {
     /// ```
     ///
     /// [`InputMessage`]: crate::InputMessage
-    // TODO don't require nasty InputPeer
-    // TODO return Message
     pub async fn send_message(
         &mut self,
         chat: &Chat,
         message: types::InputMessage,
-    ) -> Result<(), InvocationError> {
-        if let Some(media) = message.media {
+    ) -> Result<Message, InvocationError> {
+        let random_id = generate_random_id();
+        let updates = if let Some(media) = message.media.clone() {
             self.invoke(&tl::functions::messages::SendMedia {
                 silent: message.silent,
                 background: message.background,
@@ -363,18 +362,17 @@ impl ClientHandle {
                 peer: chat.to_input_peer(),
                 reply_to_msg_id: message.reply_to,
                 media,
-                message: message.text,
-                random_id: generate_random_id(),
-                reply_markup: message.reply_markup,
+                message: message.text.clone(),
+                random_id,
+                reply_markup: message.reply_markup.clone(),
                 entities: if message.entities.is_empty() {
                     None
                 } else {
-                    Some(message.entities)
+                    Some(message.entities.clone())
                 },
                 schedule_date: message.schedule_date,
             })
             .await
-            .map(drop)
         } else {
             self.invoke(&tl::functions::messages::SendMessage {
                 no_webpage: !message.link_preview,
@@ -383,19 +381,28 @@ impl ClientHandle {
                 clear_draft: message.clear_draft,
                 peer: chat.to_input_peer(),
                 reply_to_msg_id: message.reply_to,
-                message: message.text,
-                random_id: generate_random_id(),
-                reply_markup: message.reply_markup,
+                message: message.text.clone(),
+                random_id,
+                reply_markup: message.reply_markup.clone(),
                 entities: if message.entities.is_empty() {
                     None
                 } else {
-                    Some(message.entities)
+                    Some(message.entities.clone())
                 },
                 schedule_date: message.schedule_date,
             })
             .await
-            .map(drop)
-        }
+        }?;
+
+        Ok(match updates {
+            tl::enums::Updates::UpdateShortSentMessage(updates) => {
+                Message::from_short_updates(self, updates, message, chat)
+            }
+            updates => map_random_ids_to_messages(self, &[random_id], updates)
+                .pop()
+                .unwrap()
+                .unwrap(),
+        })
     }
 
     /// Edits an existing message.
