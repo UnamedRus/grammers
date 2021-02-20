@@ -230,14 +230,21 @@ impl Message {
     ///
     /// This might be the user you're talking to for private conversations, or the group or
     /// channel where the message was sent.
-    pub fn chat(&self) -> Option<types::Chat> {
+    pub fn chat(&self) -> types::Chat {
         self.chats
             .get(&self.msg.peer_id)
             .map(|e| e.clone())
+            .unwrap()
     }
 
     pub fn chat_id(&self) -> i32 {
         self.msg.peer_id        
+    }
+    
+    pub fn try_chat(&self) -> Option<types::Chat> {
+        self.chats
+            .get(&self.msg.peer_id)
+            .map(|e| e.clone())
     }
     
     /// If this message was forwarded from a previous message, return the header with information
