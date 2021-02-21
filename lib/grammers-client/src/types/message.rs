@@ -239,9 +239,9 @@ impl Message {
 
     pub fn chat_id(&self) -> i32 {
         match self.msg.peer_id {
-            tl::types::PeerUser(usr) => usr.user_id,
-            tl::types::PeerChat(chat) => chat.chat_id,
-            tl::types::PeerChannel(channel) => channel.channel_id,
+            tl::types::PeerUser{user_id} => user_id,
+            tl::types::PeerChat{chat_id} => chat_id,
+            tl::types::PeerChannel{channel_id} => channel_id,
         }        
     }
     
