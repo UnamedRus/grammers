@@ -238,10 +238,10 @@ impl Message {
     }
 
     pub fn chat_id(&self) -> i32 {
-        match self.msg.peer_id {
-            tl::types::PeerUser{user_id} => user_id,
-            tl::types::PeerChat{chat_id} => chat_id,
-            tl::types::PeerChannel{channel_id} => channel_id,
+        match &self.msg.peer_id {
+            tl::enums::Peer::User(user) => user.user_id,
+            tl::enums::Peer::Chat(chat) => chat.chat_id,
+            tl::enums::Peer::Channel(channel) => channel.channel_id,
         }        
     }
     
