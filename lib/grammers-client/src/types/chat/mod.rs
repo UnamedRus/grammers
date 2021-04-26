@@ -10,7 +10,9 @@ mod group;
 mod user;
 
 use grammers_tl_types as tl;
+use tl::{Deserializable, Serializable};
 
+use super::Peer;
 pub use channel::Channel;
 pub use group::Group;
 pub use user::{Platform, RestrictionReason, User};
@@ -32,6 +34,52 @@ pub enum Chat {
 
     /// A broadcast [`Channel`].
     Channel(Channel),
+}
+
+/// A packed chat
+pub struct PackedChat {
+    pub(crate) peer: Peer,
+    pub(crate) access_hash: Option<i64>,
+}
+
+impl PackedChat {
+    /// Serialize the packed chat into a new buffer and return its bytes.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        match self.peer {
+            Peer::User(user_id) => tl::enums::InputPeer::User(tl::types::InputPeerUser {
+                user_id,
+                access_hash: self.access_hash.unwrap(),
+            }),
+            Peer::Chat(chat_id) => tl::enums::InputPeer::Chat(tl::types::InputPeerChat { chat_id }),
+            Peer::Channel(channel_id) => {
+                tl::enums::InputPeer::Channel(tl::types::InputPeerChannel {
+                    channel_id,
+                    access_hash: self.access_hash.unwrap(),
+                })
+            }
+        }
+        .to_bytes()
+    }
+
+    /// Deserialize the buffer into a packed chat
+    pub fn from_bytes(buf: &[u8]) -> tl::deserialize::Result<Self> {
+        let input_peer = tl::enums::InputPeer::from_bytes(&buf)?;
+        Ok(match input_peer {
+            tl::enums::InputPeer::User(user) => Self {
+                peer: Peer::User(user.user_id),
+                access_hash: Some(user.access_hash),
+            },
+            tl::enums::InputPeer::Chat(chat) => Self {
+                peer: Peer::Chat(chat.chat_id),
+                access_hash: None,
+            },
+            tl::enums::InputPeer::Channel(channel) => Self {
+                peer: Peer::Channel(channel.channel_id),
+                access_hash: Some(channel.access_hash),
+            },
+            _ => panic!("{:?} passed to PackedChat::from_bytes", &input_peer),
+        })
+    }
 }
 
 impl Chat {
@@ -117,6 +165,14 @@ impl Chat {
         }
     }
 
+    fn access_hash(&self) -> Option<i64> {
+        match self {
+            Self::User(user) => user.access_hash(),
+            Self::Group(group) => group.access_hash(),
+            Self::Channel(channel) => channel.access_hash(),
+        }
+    }
+
     /// Return the name of this chat.
     ///
     /// For private conversations (users), this is their first name. For groups and channels,
@@ -128,6 +184,14 @@ impl Chat {
             Self::User(user) => user.first_name(),
             Self::Group(group) => group.title(),
             Self::Channel(channel) => channel.title(),
+        }
+    }
+
+    /// Pack this chat into a smaller representation that can be loaded later.
+    pub fn pack(&self) -> PackedChat {
+        PackedChat {
+            peer: (&self.to_peer()).into(),
+            access_hash: self.access_hash(),
         }
     }
 }

@@ -8,10 +8,10 @@
 
 //! Methods related to users, groups and channels.
 
-use super::ClientHandle;
+use super::Client;
 use crate::types::{
-    AdminRightsBuilder, BannedRightsBuilder, Chat, ChatMap, IterBuffer, Message, Participant,
-    Photo, User,
+    chat::PackedChat, AdminRightsBuilder, BannedRightsBuilder, Chat, ChatMap, IterBuffer, Message,
+    Participant, Peer, Photo, User,
 };
 pub use grammers_mtsender::{AuthorizationError, InvocationError};
 use grammers_tl_types as tl;
@@ -26,7 +26,7 @@ const KICK_BAN_DURATION: i32 = 60; // in seconds, in case the second request fai
 pub enum ParticipantIter {
     Empty,
     Chat {
-        client: ClientHandle,
+        client: Client,
         chat_id: i32,
         buffer: VecDeque<Participant>,
         total: Option<usize>,
@@ -35,7 +35,7 @@ pub enum ParticipantIter {
 }
 
 impl ParticipantIter {
-    fn new(client: &ClientHandle, chat: &Chat) -> Self {
+    fn new(client: &Client, chat: &Chat) -> Self {
         if let Some(channel) = chat.to_input_channel() {
             Self::Channel(IterBuffer::from_request(
                 client,
@@ -199,7 +199,7 @@ pub enum ProfilePhotoIter {
 }
 
 impl ProfilePhotoIter {
-    fn new(client: &ClientHandle, chat: &Chat) -> Self {
+    fn new(client: &Client, chat: &Chat) -> Self {
         if let Some(user_id) = chat.to_input_user() {
             Self::User(IterBuffer::from_request(
                 client,
@@ -309,7 +309,7 @@ impl ProfilePhotoIter {
 }
 
 /// Method implementations related to dealing with chats or other users.
-impl ClientHandle {
+impl Client {
     /// Resolves a username into the chat that owns it, if any.
     ///
     /// Note that this method is expensive to call, and can quickly cause long flood waits.
@@ -317,7 +317,7 @@ impl ClientHandle {
     /// # Examples
     ///
     /// ```
-    /// # async fn f(mut client: grammers_client::ClientHandle) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn f(mut client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
     /// if let Some(chat) = client.resolve_username("username").await? {
     ///     println!("Found chat!: {:?}", chat.name());
     /// }
@@ -363,7 +363,7 @@ impl ClientHandle {
     /// # Examples
     ///
     /// ```
-    /// # async fn f(mut client: grammers_client::ClientHandle) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn f(mut client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
     /// println!("Displaying full user information of the logged-in user:");
     /// dbg!(client.get_me().await?);
     /// # Ok(())
@@ -392,7 +392,7 @@ impl ClientHandle {
     /// # Examples
     ///
     /// ```
-    /// # async fn f(chat: grammers_client::types::Chat, mut client: grammers_client::ClientHandle) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn f(chat: grammers_client::types::Chat, mut client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
     /// let mut participants = client.iter_participants(&chat);
     ///
     /// while let Some(participant) = participants.next().await? {
@@ -419,7 +419,7 @@ impl ClientHandle {
     /// # Examples
     ///
     /// ```
-    /// # async fn f(chat: grammers_client::types::Chat, user: grammers_client::types::User, mut client: grammers_client::ClientHandle) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn f(chat: grammers_client::types::Chat, user: grammers_client::types::User, mut client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
     /// match client.kick_participant(&chat, &user).await {
     ///     Ok(_) => println!("user is no more >:D"),
     ///     Err(_) => println!("Kick failed! Are you sure you're admin?"),
@@ -477,7 +477,7 @@ impl ClientHandle {
     /// # Example
     ///
     /// ```
-    /// # async fn f(chat: grammers_client::types::Chat, user: grammers_client::types::User, mut client: grammers_client::ClientHandle) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn f(chat: grammers_client::types::Chat, user: grammers_client::types::User, mut client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
     /// // This user keeps spamming pepe stickers, take the sticker permission away from them
     /// let res = client
     ///     .set_banned_rights(&chat, &user)
@@ -516,7 +516,7 @@ impl ClientHandle {
     /// # Example
     ///
     /// ```
-    /// # async fn f(chat: grammers_client::types::Chat, user: grammers_client::types::User, mut client: grammers_client::ClientHandle) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn f(chat: grammers_client::types::Chat, user: grammers_client::types::User, mut client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
     /// // Let the user pin messages and ban other people
     /// let res = client.set_admin_rights(&chat, &user)
     ///     .load_current()
@@ -544,7 +544,7 @@ impl ClientHandle {
     /// # Examples
     ///
     /// ```
-    /// # async fn f(chat: grammers_client::types::Chat, mut client: grammers_client::ClientHandle) -> Result<(), Box<dyn std::error::Error>> {
+    /// # async fn f(chat: grammers_client::types::Chat, mut client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
     /// let mut photos = client.iter_profile_photos(&chat);
     ///
     /// while let Some(photo) = photos.next().await? {
@@ -555,5 +555,67 @@ impl ClientHandle {
     /// ```
     pub fn iter_profile_photos(&self, chat: &Chat) -> ProfilePhotoIter {
         ProfilePhotoIter::new(self, chat)
+    }
+
+    /// Convert a [`PackedChat`] back into a [`Chat`]
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// # async fn f(packed_chat: grammers_client::types::chat::PackedChat, mut client: grammers_client::Client) -> Result<(), Box<dyn std::error::Error>> {
+    /// let chat = client.unpack_chat(&packed_chat).await?;
+    ///
+    /// println!("Found chat: {}", chat.name());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub async fn unpack_chat(&mut self, packed_chat: &PackedChat) -> Result<Chat, InvocationError> {
+        Ok(match packed_chat.peer {
+            Peer::User(user_id) => {
+                let mut res = self
+                    .invoke(&tl::functions::users::GetUsers {
+                        id: vec![tl::enums::InputUser::User(tl::types::InputUser {
+                            user_id,
+                            access_hash: packed_chat.access_hash.unwrap(),
+                        })],
+                    })
+                    .await?;
+                if res.len() != 1 {
+                    panic!("fetching only one user should exactly return one user");
+                }
+                Chat::from_user(res.pop().unwrap())
+            }
+            Peer::Chat(chat_id) => {
+                let mut res = match self
+                    .invoke(&tl::functions::messages::GetChats { id: vec![chat_id] })
+                    .await?
+                {
+                    tl::enums::messages::Chats::Chats(chats) => chats.chats,
+                    tl::enums::messages::Chats::Slice(chat_slice) => chat_slice.chats,
+                };
+                if res.len() != 1 {
+                    panic!("fetching only one chat should exactly return one chat");
+                }
+                Chat::from_chat(res.pop().unwrap())
+            }
+            Peer::Channel(channel_id) => {
+                let mut res = match self
+                    .invoke(&tl::functions::channels::GetChannels {
+                        id: vec![tl::enums::InputChannel::Channel(tl::types::InputChannel {
+                            channel_id,
+                            access_hash: packed_chat.access_hash.unwrap(),
+                        })],
+                    })
+                    .await?
+                {
+                    tl::enums::messages::Chats::Chats(chats) => chats.chats,
+                    tl::enums::messages::Chats::Slice(chat_slice) => chat_slice.chats,
+                };
+                if res.len() != 1 {
+                    panic!("fetching only one chat should exactly return one chat");
+                }
+                Chat::from_chat(res.pop().unwrap())
+            }
+        })
     }
 }

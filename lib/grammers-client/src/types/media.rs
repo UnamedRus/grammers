@@ -6,15 +6,28 @@
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
 use crate::types::photo_sizes::PhotoSize;
-use crate::ClientHandle;
+use crate::Client;
+use chrono::{DateTime, NaiveDateTime, Utc};
 use grammers_tl_types as tl;
-use std::fmt;
-use std::fmt::{Debug, Formatter};
+use std::fmt::Debug;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Photo {
     photo: tl::types::MessageMediaPhoto,
-    client: ClientHandle,
+    client: Client,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Document {
+    document: tl::types::MessageMediaDocument,
+    client: Client,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sticker {
+    pub document: Document,
+    attrs: tl::types::DocumentAttributeSticker,
+    animated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -26,11 +39,12 @@ pub struct Uploaded {
 #[non_exhaustive]
 pub enum Media {
     Photo(Photo),
-    Uploaded(Uploaded),
+    Document(Document),
+    Sticker(Sticker),
 }
 
 impl Photo {
-    pub(crate) fn from_raw(photo: tl::enums::Photo, client: ClientHandle) -> Self {
+    pub(crate) fn from_raw(photo: tl::enums::Photo, client: Client) -> Self {
         Self {
             photo: tl::types::MessageMediaPhoto {
                 photo: Some(photo),
@@ -40,7 +54,7 @@ impl Photo {
         }
     }
 
-    pub(crate) fn from_media(photo: tl::types::MessageMediaPhoto, client: ClientHandle) -> Self {
+    pub(crate) fn from_media(photo: tl::types::MessageMediaPhoto, client: Client) -> Self {
         Self { photo, client }
     }
 
@@ -59,6 +73,26 @@ impl Photo {
                 .into(),
             ),
         })
+    }
+
+    fn to_input_media(&self) -> tl::types::InputMediaPhoto {
+        use tl::{
+            enums::{InputPhoto as eInputPhoto, Photo},
+            types::InputPhoto,
+        };
+
+        tl::types::InputMediaPhoto {
+            id: match self.photo.photo {
+                Some(Photo::Photo(ref photo)) => InputPhoto {
+                    id: photo.id,
+                    access_hash: photo.access_hash,
+                    file_reference: photo.file_reference.clone(),
+                }
+                .into(),
+                _ => eInputPhoto::Empty,
+            },
+            ttl_seconds: self.photo.ttl_seconds,
+        }
     }
 
     pub fn id(&self) -> i64 {
@@ -99,15 +133,137 @@ impl Photo {
     }
 }
 
-impl Debug for Photo {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{:?}", self.photo)
+impl Document {
+    pub(crate) fn from_media(document: tl::types::MessageMediaDocument, client: Client) -> Self {
+        Self { document, client }
+    }
+
+    fn to_input_location(&self) -> Option<tl::enums::InputFileLocation> {
+        use tl::enums::Document as D;
+
+        self.document.document.as_ref().and_then(|p| match p {
+            D::Empty(_) => None,
+            D::Document(document) => Some(
+                tl::types::InputDocumentFileLocation {
+                    id: document.id,
+                    access_hash: document.access_hash,
+                    file_reference: document.file_reference.clone(),
+                    thumb_size: String::new(),
+                }
+                .into(),
+            ),
+        })
+    }
+
+    fn to_input_media(&self) -> tl::types::InputMediaDocument {
+        use tl::{
+            enums::{Document, InputDocument as eInputDocument},
+            types::InputDocument,
+        };
+
+        tl::types::InputMediaDocument {
+            id: match self.document.document {
+                Some(Document::Document(ref document)) => InputDocument {
+                    id: document.id,
+                    access_hash: document.access_hash,
+                    file_reference: document.file_reference.clone(),
+                }
+                .into(),
+                _ => eInputDocument::Empty,
+            },
+            ttl_seconds: self.document.ttl_seconds,
+            query: None,
+        }
+    }
+
+    pub fn id(&self) -> i64 {
+        use tl::enums::Document as D;
+
+        match self.document.document.as_ref().unwrap() {
+            D::Empty(document) => document.id,
+            D::Document(document) => document.id,
+        }
+    }
+
+    /// Return the file's name.
+    ///
+    /// If the file was uploaded with no file name, the returned string will be empty.
+    pub fn name(&self) -> &str {
+        use tl::enums::Document as D;
+
+        match self.document.document.as_ref().unwrap() {
+            D::Empty(_) => "",
+            D::Document(document) => document
+                .attributes
+                .iter()
+                .find_map(|attr| match attr {
+                    tl::enums::DocumentAttribute::Filename(attr) => Some(attr.file_name.as_ref()),
+                    _ => None,
+                })
+                .unwrap_or(""),
+        }
+    }
+
+    /// Get the file's MIME type, if any.
+    pub fn mime_type(&self) -> Option<&str> {
+        match self.document.document.as_ref() {
+            Some(tl::enums::Document::Document(d)) => Some(d.mime_type.as_str()),
+            _ => None,
+        }
+    }
+
+    /// The date on which the file was created, if any.
+    pub fn creation_date(&self) -> Option<DateTime<Utc>> {
+        match self.document.document.as_ref() {
+            Some(tl::enums::Document::Document(d)) => Some(DateTime::from_utc(
+                NaiveDateTime::from_timestamp(d.date as i64, 0),
+                Utc,
+            )),
+            _ => None,
+        }
+    }
+
+    /// The size of the file.
+    /// returns 0 if the document is empty.
+    pub fn size(&self) -> i32 {
+        match self.document.document.as_ref() {
+            Some(tl::enums::Document::Document(d)) => d.size,
+            _ => 0,
+        }
     }
 }
 
-impl PartialEq for Photo {
-    fn eq(&self, other: &Self) -> bool {
-        self.photo == other.photo
+impl Sticker {
+    pub(crate) fn from_document(document: &Document) -> Option<Self> {
+        match document.document.document {
+            Some(tl::enums::Document::Document(ref doc)) => {
+                let mut animated = false;
+                let mut sticker_attrs: Option<tl::types::DocumentAttributeSticker> = None;
+                for attr in &doc.attributes {
+                    match attr {
+                        tl::enums::DocumentAttribute::Sticker(s) => sticker_attrs = Some(s.clone()),
+                        tl::enums::DocumentAttribute::Animated => animated = true,
+                        _ => (),
+                    }
+                }
+                Some(Self {
+                    document: document.clone(),
+                    attrs: sticker_attrs?,
+                    animated,
+                })
+            }
+            _ => None,
+        }
+    }
+
+    /// Get the emoji associated with the sticker.
+    pub fn emoji(&self) -> &str {
+        return self.attrs.alt.as_str();
+    }
+
+    /// Is this sticker an animated sticker?
+    pub fn is_animated(&self) -> bool {
+        return self.animated;
     }
 }
 
@@ -125,7 +281,7 @@ impl Uploaded {
 }
 
 impl Media {
-    pub(crate) fn from_raw(media: tl::enums::MessageMedia, client: ClientHandle) -> Option<Self> {
+    pub(crate) fn from_raw(media: tl::enums::MessageMedia, client: Client) -> Option<Self> {
         use tl::enums::MessageMedia as M;
 
         // TODO implement the rest
@@ -135,7 +291,14 @@ impl Media {
             M::Geo(_) => None,
             M::Contact(_) => None,
             M::Unsupported => None,
-            M::Document(_) => None,
+            M::Document(document) => {
+                let document = Document::from_media(document, client);
+                Some(if let Some(sticker) = Sticker::from_document(&document) {
+                    Self::Sticker(sticker)
+                } else {
+                    Self::Document(document)
+                })
+            }
             M::WebPage(_) => None,
             M::Venue(_) => None,
             M::Game(_) => None,
@@ -146,10 +309,19 @@ impl Media {
         }
     }
 
+    pub(crate) fn to_input_media(&self) -> tl::enums::InputMedia {
+        match self {
+            Media::Photo(photo) => photo.to_input_media().into(),
+            Media::Document(document) => document.to_input_media().into(),
+            Media::Sticker(sticker) => sticker.document.to_input_media().into(),
+        }
+    }
+
     pub(crate) fn to_input_location(&self) -> Option<tl::enums::InputFileLocation> {
         match self {
             Media::Photo(photo) => photo.to_input_location(),
-            Media::Uploaded(_) => None,
+            Media::Document(document) => document.to_input_location(),
+            Media::Sticker(sticker) => sticker.document.to_input_location(),
         }
     }
 }
@@ -157,11 +329,5 @@ impl Media {
 impl From<Photo> for Media {
     fn from(photo: Photo) -> Self {
         Self::Photo(photo)
-    }
-}
-
-impl From<Uploaded> for Media {
-    fn from(uploaded: Uploaded) -> Self {
-        Self::Uploaded(uploaded)
     }
 }

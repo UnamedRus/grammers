@@ -5,7 +5,7 @@
 // <LICENSE-MIT or https://opensource.org/licenses/MIT>, at your
 // option. This file may not be copied, modified, or distributed
 // except according to those terms.
-use crate::types::Uploaded;
+use crate::types::{Media, Uploaded};
 use grammers_tl_types as tl;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -133,6 +133,7 @@ impl InputMessage {
     /// The text will be the caption of the document, which may be empty for no caption.
     pub fn document(mut self, file: Uploaded) -> Self {
         let mime_type = self.get_file_mime(&file);
+        let file_name = file.name().to_string();
         self.media = Some(
             tl::types::InputMediaUploadedDocument {
                 nosound_video: false,
@@ -140,12 +141,21 @@ impl InputMessage {
                 file: file.input_file,
                 thumb: None,
                 mime_type,
-                attributes: Vec::new(),
+                // TODO provide a way to set other attributes
+                attributes: vec![tl::types::DocumentAttributeFilename { file_name }.into()],
                 stickers: None,
                 ttl_seconds: self.media_ttl,
             }
             .into(),
         );
+        self
+    }
+
+    /// Copy media from an existing message.
+    ///
+    /// You can use this to send media from another message without re-uploading it.
+    pub fn copy_media(mut self, media: &Media) -> Self {
+        self.media = Some(media.to_input_media());
         self
     }
 
@@ -156,6 +166,7 @@ impl InputMessage {
     /// The text will be the caption of the file, which may be empty for no caption.
     pub fn file(mut self, file: Uploaded) -> Self {
         let mime_type = self.get_file_mime(&file);
+        let file_name = file.name().to_string();
         self.media = Some(
             tl::types::InputMediaUploadedDocument {
                 nosound_video: false,
@@ -163,7 +174,8 @@ impl InputMessage {
                 file: file.input_file,
                 thumb: None,
                 mime_type,
-                attributes: Vec::new(),
+                // TODO provide a way to set other attributes
+                attributes: vec![tl::types::DocumentAttributeFilename { file_name }.into()],
                 stickers: None,
                 ttl_seconds: self.media_ttl,
             }
