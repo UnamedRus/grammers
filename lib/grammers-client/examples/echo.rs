@@ -19,6 +19,8 @@ use tokio::{runtime, task};
 
 type Result = std::result::Result<(), Box<dyn std::error::Error>>;
 
+const SESSION_FILE: &str = "echo.session";
+
 async fn handle_update(mut client: Client, updates: UpdateIter) -> Result {
     for update in updates {
         match update {
@@ -46,7 +48,7 @@ async fn async_main() -> Result {
 
     println!("Connecting to Telegram...");
     let mut client = Client::connect(Config {
-        session: Session::load_file_or_create("echo.session")?,
+        session: Session::load_file_or_create(SESSION_FILE)?,
         api_id,
         api_hash: api_hash.clone(),
         params: InitParams {
@@ -61,12 +63,20 @@ async fn async_main() -> Result {
     if !client.is_authorized().await? {
         println!("Signing in...");
         client.bot_sign_in(&token, api_id, &api_hash).await?;
-        // TODO save session
+        client.session().save_to_file(SESSION_FILE)?;
         println!("Signed in!");
     }
 
     println!("Waiting for messages...");
-    while let Some(updates) = client.next_updates().await? {
+
+    // This code uses `select!` on Ctrl+C to gracefully stop the client and have a chance to
+    // save the session. You could have fancier logic to save the session if you wanted to
+    // (or even save it on every update). Or you could also ignore Ctrl+C and just use
+    // `while let Some(updates) =  client.next_updates().await?`.
+    while let Some(updates) = tokio::select! {
+        _ = tokio::signal::ctrl_c() => Ok(None),
+        result = client.next_updates() => result,
+    }? {
         let handle = client.clone();
         task::spawn(async move {
             match handle_update(handle, updates).await {
@@ -74,14 +84,10 @@ async fn async_main() -> Result {
                 Err(e) => eprintln!("Error handling updates!: {}", e),
             }
         });
-
-        // Save the session file on every update so that we can correctly resume next time we
-        // connect after a period of being offline (catching up on updates).
-        //
-        // The alternative is to detect `Ctrl+C` and break from the loop.
-        // TODO save session
     }
 
+    println!("Saving session file and exiting...");
+    client.session().save_to_file(SESSION_FILE)?;
     Ok(())
 }
 
