@@ -1,6 +1,6 @@
 [package]
 name = "grammers-crypto"
-version = "0.2.0"
+version = "0.3.0"
 authors = ["Lonami Exo <totufals@hotmail.com>"]
 license = "MIT OR Apache-2.0"
 description = """
@@ -14,21 +14,18 @@ categories = ["cryptography"]
 edition = "2018"
 
 [dependencies]
-aes-soft = "0.6.4"
+aes = "0.7.0"
 getrandom = "0.2.2"
 num-bigint = "0.4.0"
-once_cell = "1.7.2"
 sha1 = "0.6.0"
 sha2 = "0.9.3"
 pbkdf2 = "0.8.0"
 hmac = "0.11.0"
 glass_pumpkin = "1.0.0"
 
-[target.'cfg(any(target_arch = "x86", target_arch = "x86_64"))'.dependencies]
-aesni = { version = "0.10.0", default-features = false, features = ["nocheck"] }
-
 [dev-dependencies]
-criterion = "0.3.4"
+bencher = "0.1.5"
+toml = "0.5.8"
 
 [[bench]]
 name = "cipher"
