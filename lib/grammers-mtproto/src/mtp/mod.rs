@@ -182,6 +182,35 @@ impl From<tl::types::RpcError> for RpcError {
     }
 }
 
+impl RpcError {
+    /// Matches on the name of the RPC error (case-sensitive).
+    ///
+    /// Useful in `match` arm guards. A single trailing or leading asterisk (`'*'`) is allowed,
+    /// and will instead check if the error name starts (or ends with) the input parameter.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # let request_result = Result::<(), _>::Err(grammers_mtproto::mtp::RpcError {
+    /// #     code: 400, name: "PHONE_CODE_INVALID".to_string(), value: None });
+    /// #
+    /// match request_result {
+    ///     Err(rpc_err) if rpc_err.is("SESSION_PASSWORD_NEEDED") => panic!(),
+    ///     Err(rpc_err) if rpc_err.is("PHONE_CODE_*") => {},
+    ///     _ => panic!()
+    /// }
+    /// ```
+    pub fn is(&self, rpc_error: &str) -> bool {
+        if rpc_error.ends_with('*') {
+            self.name.starts_with(&rpc_error[..rpc_error.len() - 1])
+        } else if rpc_error.starts_with('*') {
+            self.name.ends_with(&rpc_error[1..])
+        } else {
+            self.name == rpc_error
+        }
+    }
+}
+
 /// This error occurs when a Remote Procedure call was unsuccessful.
 ///
 /// The request should be retransmited when this happens, unless the
@@ -215,7 +244,20 @@ impl fmt::Display for RequestError {
         match self {
             Self::RpcError(error) => write!(f, "request error: {}", error),
             Self::Dropped => write!(f, "request error: request dropped"),
-            Self::BadMessage { code } => write!(f, "request error: bad message (code {})", code),
+            Self::BadMessage { code } => write!(f, "request error: bad message (code {}, {})", code, match code {
+                16 => "msg_id too low",
+                17 => "msg_id too high",
+                18 => "incorrect two lower order msg_id bits; this is a bug",
+                19 => "container msg_id is the same as msg_id of a previously received message; this is a bug",
+                20 => "message too old",
+                32 => "msg_seqno too low",
+                33 => "msg_seqno too high",
+                34 => "an even msg_seqno expected; this may be a bug",
+                35 => "odd msg_seqno expected; this may be a bug",
+                48 => "incorrect server salt",
+                64 => "invalid container; this is likely a bug",
+                _ => "unknown explanation; please report this issue",
+            }),
             Self::Deserialize(error) => write!(f, "request error: {}", error),
         }
     }
