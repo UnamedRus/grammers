@@ -14,6 +14,7 @@ use std::fmt;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::Notify;
 
 /// When no locale is found, use this one instead.
 const DEFAULT_LOCALE: &str = "en";
@@ -97,10 +98,11 @@ pub(crate) struct ClientInner {
     // Used to implement `PartialEq`.
     pub(crate) id: i64,
     pub(crate) sender: AsyncMutex<Sender<transport::Full, mtp::Encrypted>>,
+    pub(crate) stepping_done: Notify,
     pub(crate) dc_id: Mutex<i32>,
     pub(crate) config: Config,
     pub(crate) message_box: Mutex<MessageBox>,
-    pub(crate) chat_hashes: ChatHashCache,
+    pub(crate) chat_hashes: Mutex<ChatHashCache>,
     // When did we last warn the user that the update queue filled up?
     // This is used to avoid spamming the log.
     pub(crate) last_update_limit_warn: Mutex<Option<Instant>>,

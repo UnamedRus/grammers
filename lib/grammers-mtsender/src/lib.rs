@@ -34,7 +34,7 @@ use tokio::time::{sleep_until, Duration, Instant};
 /// Telegram will close the connection with roughly a megabyte of data,
 /// so to account for the transports' own overhead, we add a few extra
 /// kilobytes to the maximum data size.
-const MAXIMUM_DATA: usize = (1 * 1024 * 1024) + (8 * 1024);
+const MAXIMUM_DATA: usize = (1024 * 1024) + (8 * 1024);
 
 /// Every how often are pings sent?
 const PING_DELAY: Duration = Duration::from_secs(60);
@@ -58,7 +58,9 @@ pub(crate) fn generate_random_id() -> i64 {
             .expect("system time is before epoch")
             .as_nanos() as i64;
 
-        drop(LAST_ID.compare_exchange(0, now, Ordering::SeqCst, Ordering::SeqCst));
+        LAST_ID
+            .compare_exchange(0, now, Ordering::SeqCst, Ordering::SeqCst)
+            .unwrap();
     }
 
     LAST_ID.fetch_add(1, Ordering::SeqCst)
@@ -109,8 +111,7 @@ impl Enqueuer {
         assert!(body.len() >= 4);
         let req_id = u32::from_le_bytes([body[0], body[1], body[2], body[3]]);
         debug!(
-            "enqueueing request {:x} ({}) to be serialized",
-            req_id,
+            "enqueueing request {} to be serialized",
             tl::name_for_id(req_id)
         );
 
@@ -174,8 +175,7 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
         assert!(body.len() >= 4);
         let req_id = u32::from_le_bytes([body[0], body[1], body[2], body[3]]);
         debug!(
-            "enqueueing request {:x} ({}) to be serialized",
-            req_id,
+            "enqueueing request {} to be serialized",
             tl::name_for_id(req_id)
         );
 
@@ -444,8 +444,11 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                                 );
                                 Ok(x)
                             }
-                            Err(mtp::RequestError::RpcError(error)) => {
+                            Err(mtp::RequestError::RpcError(mut error)) => {
                                 debug!("got rpc error {:?} for request {:?}", error, msg_id);
+                                let x = req.body.as_slice();
+                                error.caused_by =
+                                    Some(u32::from_le_bytes([x[0], x[1], x[2], x[3]]));
                                 Err(InvocationError::Rpc(error))
                             }
                             Err(mtp::RequestError::Dropped) => {
@@ -467,7 +470,6 @@ impl<T: Transport, M: Mtp> Sender<T, M> {
                             }
                         };
 
-                        drop(req);
                         let req = self.requests.remove(i);
                         drop(req.result.send(result));
                         break;
